@@ -50,9 +50,13 @@ func NewTrendsHandler(provider TrendsProvider, window time.Duration) (*TrendsHan
 }
 
 // NewRouter создает HTTP router сервиса
-func NewRouter(trendsHandler *TrendsHandler) http.Handler {
+func NewRouter(trendsHandler *TrendsHandler, stopListHandler ...*StopListHandler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/trends", trendsHandler)
+	if len(stopListHandler) > 0 && stopListHandler[0] != nil {
+		mux.Handle(stopListPath, stopListHandler[0])
+		mux.Handle(stopListPath+"/", stopListHandler[0])
+	}
 
 	return mux
 }
