@@ -53,6 +53,9 @@ func NewTrendsHandler(provider TrendsProvider, window time.Duration) (*TrendsHan
 func NewRouter(trendsHandler *TrendsHandler, stopListHandler ...*StopListHandler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/trends", trendsHandler)
+	healthHandler := NewHealthHandler(nil)
+	mux.Handle(healthPath, healthHandler)
+	mux.Handle(readyPath, healthHandler)
 	if len(stopListHandler) > 0 && stopListHandler[0] != nil {
 		mux.Handle(stopListPath, stopListHandler[0])
 		mux.Handle(stopListPath+"/", stopListHandler[0])

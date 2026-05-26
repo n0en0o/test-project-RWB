@@ -51,10 +51,16 @@ func (f EventHandlerFunc) HandleSearchEvent(ctx context.Context, event trends.Se
 	return f(ctx, event)
 }
 
+type ConsumerMetrics interface {
+	IncKafkaMessage(result string)
+	IncEventProcessingError(reason string)
+}
+
 type Consumer struct {
 	reader  Reader
 	handler EventHandler
 	logger  *slog.Logger
+	metrics ConsumerMetrics
 }
 
 // NewReader создает Kafka reader из конфигурации consumer
@@ -91,6 +97,11 @@ func NewConsumer(reader Reader, handler EventHandler, logger *slog.Logger) (*Con
 		handler: handler,
 		logger:  logger,
 	}, nil
+}
+
+// SetMetrics подключает observer для Kafka consumer метрик
+func (c *Consumer) SetMetrics(metrics ConsumerMetrics) {
+	c.metrics = metrics
 }
 
 // Run читает сообщения до отмены контекста
@@ -145,20 +156,41 @@ func (c ConsumerConfig) withDefaults() ConsumerConfig {
 func (c *Consumer) handleMessage(ctx context.Context, message kafkago.Message) error {
 	event, err := trends.ParseSearchEvent(message.Value)
 	if err != nil {
+		c.recordKafkaMessage("invalid")
+		c.recordEventProcessingError("parse_error")
 		c.logger.WarnContext(ctx, "skip invalid kafka message", "topic", message.Topic, "partition", message.Partition, "offset", message.Offset, "error", err)
 		if err := c.reader.CommitMessages(ctx, message); err != nil {
+			c.recordKafkaMessage("commit_error")
 			return fmt.Errorf("commit invalid kafka message: %w", err)
 		}
 		return nil
 	}
 
 	if err := c.handler.HandleSearchEvent(ctx, event); err != nil {
+		c.recordKafkaMessage("handler_error")
+		c.recordEventProcessingError("handler_error")
 		return fmt.Errorf("handle search event: %w", err)
 	}
 
 	if err := c.reader.CommitMessages(ctx, message); err != nil {
+		c.recordKafkaMessage("commit_error")
 		return fmt.Errorf("commit kafka message: %w", err)
 	}
 
+	c.recordKafkaMessage("processed")
 	return nil
+}
+
+func (c *Consumer) recordKafkaMessage(result string) {
+	if c.metrics == nil {
+		return
+	}
+	c.metrics.IncKafkaMessage(result)
+}
+
+func (c *Consumer) recordEventProcessingError(reason string) {
+	if c.metrics == nil {
+		return
+	}
+	c.metrics.IncEventProcessingError(reason)
 }

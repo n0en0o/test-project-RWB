@@ -18,12 +18,14 @@ func TestConsumerRunHandlesAndCommitsValidMessage(t *testing.T) {
 	reader := &fakeReader{
 		messages: []kafkago.Message{validKafkaMessage("event-1")},
 	}
+	metrics := &fakeConsumerMetrics{}
 
 	var handled []trends.SearchEvent
 	consumer := newTestConsumer(t, reader, EventHandlerFunc(func(ctx context.Context, event trends.SearchEvent) error {
 		handled = append(handled, event)
 		return nil
 	}))
+	consumer.SetMetrics(metrics)
 
 	if err := consumer.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -38,6 +40,9 @@ func TestConsumerRunHandlesAndCommitsValidMessage(t *testing.T) {
 	if len(reader.committed) != 1 {
 		t.Fatalf("committed messages = %d, want 1", len(reader.committed))
 	}
+	if metrics.kafkaMessages["processed"] != 1 {
+		t.Fatalf("processed kafka messages = %d, want 1", metrics.kafkaMessages["processed"])
+	}
 }
 
 func TestConsumerRunCommitsInvalidMessage(t *testing.T) {
@@ -46,11 +51,13 @@ func TestConsumerRunCommitsInvalidMessage(t *testing.T) {
 	reader := &fakeReader{
 		messages: []kafkago.Message{{Value: []byte(`{bad json}`)}},
 	}
+	metrics := &fakeConsumerMetrics{}
 
 	consumer := newTestConsumer(t, reader, EventHandlerFunc(func(ctx context.Context, event trends.SearchEvent) error {
 		t.Fatalf("handler should not be called")
 		return nil
 	}))
+	consumer.SetMetrics(metrics)
 
 	if err := consumer.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -58,6 +65,12 @@ func TestConsumerRunCommitsInvalidMessage(t *testing.T) {
 
 	if len(reader.committed) != 1 {
 		t.Fatalf("committed messages = %d, want 1", len(reader.committed))
+	}
+	if metrics.kafkaMessages["invalid"] != 1 {
+		t.Fatalf("invalid kafka messages = %d, want 1", metrics.kafkaMessages["invalid"])
+	}
+	if metrics.processingErrors["parse_error"] != 1 {
+		t.Fatalf("parse errors = %d, want 1", metrics.processingErrors["parse_error"])
 	}
 }
 
@@ -68,10 +81,12 @@ func TestConsumerRunDoesNotCommitWhenHandlerFails(t *testing.T) {
 		messages: []kafkago.Message{validKafkaMessage("event-1")},
 	}
 	handlerErr := errors.New("handler failed")
+	metrics := &fakeConsumerMetrics{}
 
 	consumer := newTestConsumer(t, reader, EventHandlerFunc(func(ctx context.Context, event trends.SearchEvent) error {
 		return handlerErr
 	}))
+	consumer.SetMetrics(metrics)
 
 	err := consumer.Run(context.Background())
 	if !errors.Is(err, handlerErr) {
@@ -79,6 +94,12 @@ func TestConsumerRunDoesNotCommitWhenHandlerFails(t *testing.T) {
 	}
 	if len(reader.committed) != 0 {
 		t.Fatalf("committed messages = %d, want 0", len(reader.committed))
+	}
+	if metrics.kafkaMessages["handler_error"] != 1 {
+		t.Fatalf("handler error kafka messages = %d, want 1", metrics.kafkaMessages["handler_error"])
+	}
+	if metrics.processingErrors["handler_error"] != 1 {
+		t.Fatalf("handler errors = %d, want 1", metrics.processingErrors["handler_error"])
 	}
 }
 
@@ -150,6 +171,25 @@ func (r *fakeReader) Close() error {
 }
 
 var _ Reader = (*fakeReader)(nil)
+
+type fakeConsumerMetrics struct {
+	kafkaMessages    map[string]int
+	processingErrors map[string]int
+}
+
+func (m *fakeConsumerMetrics) IncKafkaMessage(result string) {
+	if m.kafkaMessages == nil {
+		m.kafkaMessages = make(map[string]int)
+	}
+	m.kafkaMessages[result]++
+}
+
+func (m *fakeConsumerMetrics) IncEventProcessingError(reason string) {
+	if m.processingErrors == nil {
+		m.processingErrors = make(map[string]int)
+	}
+	m.processingErrors[reason]++
+}
 
 func TestConsumerCloseClosesReader(t *testing.T) {
 	t.Parallel()
