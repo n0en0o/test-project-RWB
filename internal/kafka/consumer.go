@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	defaultMinBytes = 1
-	defaultMaxBytes = 10e6
-	defaultMaxWait  = time.Second
+	defaultMinBytes   = 1
+	defaultMaxBytes   = 10e6
+	defaultMaxWait    = time.Second
+	defaultRetryDelay = time.Second
 )
 
 var (
@@ -57,13 +58,13 @@ type ConsumerMetrics interface {
 }
 
 type Consumer struct {
-	reader  Reader
-	handler EventHandler
-	logger  *slog.Logger
-	metrics ConsumerMetrics
+	reader     Reader
+	handler    EventHandler
+	logger     *slog.Logger
+	metrics    ConsumerMetrics
+	retryDelay time.Duration
 }
 
-// NewReader создает Kafka reader из конфигурации consumer
 func NewReader(config ConsumerConfig) (*kafkago.Reader, error) {
 	config = config.withDefaults()
 	if err := config.Validate(); err != nil {
@@ -80,7 +81,6 @@ func NewReader(config ConsumerConfig) (*kafkago.Reader, error) {
 	}), nil
 }
 
-// NewConsumer создает consumer для чтения поисковых событий из Kafka
 func NewConsumer(reader Reader, handler EventHandler, logger *slog.Logger) (*Consumer, error) {
 	if reader == nil {
 		return nil, ErrNilReader
@@ -93,18 +93,23 @@ func NewConsumer(reader Reader, handler EventHandler, logger *slog.Logger) (*Con
 	}
 
 	return &Consumer{
-		reader:  reader,
-		handler: handler,
-		logger:  logger,
+		reader:     reader,
+		handler:    handler,
+		logger:     logger,
+		retryDelay: defaultRetryDelay,
 	}, nil
 }
 
-// SetMetrics подключает observer для Kafka consumer метрик
 func (c *Consumer) SetMetrics(metrics ConsumerMetrics) {
 	c.metrics = metrics
 }
 
-// Run читает сообщения до отмены контекста
+func (c *Consumer) SetRetryDelay(delay time.Duration) {
+	if delay > 0 {
+		c.retryDelay = delay
+	}
+}
+
 func (c *Consumer) Run(ctx context.Context) error {
 	for {
 		message, err := c.reader.FetchMessage(ctx)
@@ -112,7 +117,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil
 			}
-			return fmt.Errorf("fetch kafka message: %w", err)
+			c.recordEventProcessingError("fetch_error")
+			c.logger.WarnContext(ctx, "fetch kafka message failed, retrying", "error", err, "retry_delay", c.retryDelay)
+			if !sleep(ctx, c.retryDelay) {
+				return nil
+			}
+			continue
 		}
 
 		if err := c.handleMessage(ctx, message); err != nil {
@@ -121,12 +131,10 @@ func (c *Consumer) Run(ctx context.Context) error {
 	}
 }
 
-// Close закрывает reader consumer
 func (c *Consumer) Close() error {
 	return c.reader.Close()
 }
 
-// Validate проверяет обязательные параметры Kafka consumer
 func (c ConsumerConfig) Validate() error {
 	if len(c.Brokers) == 0 {
 		return ErrEmptyBrokers
@@ -193,4 +201,16 @@ func (c *Consumer) recordEventProcessingError(reason string) {
 		return
 	}
 	c.metrics.IncEventProcessingError(reason)
+}
+
+func sleep(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

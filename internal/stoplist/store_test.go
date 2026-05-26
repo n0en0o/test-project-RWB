@@ -51,6 +51,22 @@ func TestStoreRemove(t *testing.T) {
 	}
 }
 
+func TestStoreContainsStopWordAsToken(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore()
+	if _, err := store.Add("iphone"); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	if !store.Contains("new iphone 15 pro") {
+		t.Fatalf("Contains() = false, want true")
+	}
+	if store.Contains("microiphone case") {
+		t.Fatalf("Contains() = true, want false")
+	}
+}
+
 func TestStoreListSorted(t *testing.T) {
 	t.Parallel()
 

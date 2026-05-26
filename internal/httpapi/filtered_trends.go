@@ -17,7 +17,6 @@ type FilteredTrendsProvider struct {
 	filter   QueryFilter
 }
 
-// NewFilteredTrendsProvider создает provider, скрывающий запросы из стоп-листа
 func NewFilteredTrendsProvider(provider TrendsProvider, filter QueryFilter) (*FilteredTrendsProvider, error) {
 	if provider == nil {
 		return nil, ErrNilTrendsProvider
@@ -32,7 +31,6 @@ func NewFilteredTrendsProvider(provider TrendsProvider, filter QueryFilter) (*Fi
 	}, nil
 }
 
-// Get возвращает top limit после фильтрации стоп-листа
 func (p *FilteredTrendsProvider) Get(limit int) (trends.Snapshot, error) {
 	if limit <= 0 || limit > p.MaxItems() {
 		return trends.Snapshot{}, trends.ErrInvalidTopLimit
@@ -61,7 +59,6 @@ func (p *FilteredTrendsProvider) Get(limit int) (trends.Snapshot, error) {
 	}, nil
 }
 
-// MaxItems возвращает максимальный размер top provider
 func (p *FilteredTrendsProvider) MaxItems() int {
 	return p.provider.MaxItems()
 }

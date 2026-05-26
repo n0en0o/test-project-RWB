@@ -27,7 +27,6 @@ type AbuseGuard struct {
 	seen     map[abuseKey]time.Time
 }
 
-// NewAbuseGuard создает защиту от частых повторов одного запроса от одного клиента
 func NewAbuseGuard(interval, ttl time.Duration) (*AbuseGuard, error) {
 	if interval <= 0 {
 		return nil, ErrInvalidAbuseInterval
@@ -43,7 +42,6 @@ func NewAbuseGuard(interval, ttl time.Duration) (*AbuseGuard, error) {
 	}, nil
 }
 
-// Allow проверяет, можно ли учитывать событие в агрегаторе
 func (g *AbuseGuard) Allow(event SearchEvent, now time.Time) error {
 	clientID := event.ClientID()
 	if clientID == "" {
@@ -79,7 +77,6 @@ func (g *AbuseGuard) Allow(event SearchEvent, now time.Time) error {
 	return nil
 }
 
-// Size возвращает количество активных ключей антинакрутки
 func (g *AbuseGuard) Size(now time.Time) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -88,12 +85,10 @@ func (g *AbuseGuard) Size(now time.Time) int {
 	return len(g.seen)
 }
 
-// Interval возвращает минимальный интервал между одинаковыми событиями клиента
 func (g *AbuseGuard) Interval() time.Duration {
 	return g.interval
 }
 
-// TTL возвращает время хранения ключей антинакрутки
 func (g *AbuseGuard) TTL() time.Duration {
 	return g.ttl
 }

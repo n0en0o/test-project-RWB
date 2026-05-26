@@ -27,7 +27,6 @@ type Registry struct {
 	eventsProcessingErrors *prometheus.CounterVec
 }
 
-// NewRegistry создает изолированный Prometheus registry с метриками сервиса
 func NewRegistry(namespace string) (*Registry, error) {
 	if namespace == "" {
 		return nil, ErrEmptyNamespace
@@ -93,7 +92,6 @@ func NewRegistry(namespace string) (*Registry, error) {
 	return metrics, nil
 }
 
-// MustNewRegistry создает registry и паникует при ошибке конфигурации
 func MustNewRegistry(namespace string) *Registry {
 	registry, err := NewRegistry(namespace)
 	if err != nil {
@@ -102,12 +100,10 @@ func MustNewRegistry(namespace string) *Registry {
 	return registry
 }
 
-// Handler возвращает HTTP handler для endpoint /metrics
 func (r *Registry) Handler() http.Handler {
 	return promhttp.HandlerFor(r.registry, promhttp.HandlerOpts{})
 }
 
-// Middleware записывает HTTP метрики для указанного route
 func (r *Registry) Middleware(route string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		startedAt := time.Now()
@@ -122,38 +118,31 @@ func (r *Registry) Middleware(route string, next http.Handler) http.Handler {
 	})
 }
 
-// ObserveHTTPRequest записывает счетчик и длительность HTTP запроса
 func (r *Registry) ObserveHTTPRequest(route, method string, statusCode int, duration time.Duration) {
 	r.httpRequestsTotal.WithLabelValues(route, method, strconv.Itoa(statusCode)).Inc()
 	r.httpRequestDuration.WithLabelValues(route, method).Observe(duration.Seconds())
 }
 
-// IncKafkaMessage увеличивает счетчик Kafka сообщений по результату обработки
 func (r *Registry) IncKafkaMessage(result string) {
 	r.kafkaMessagesTotal.WithLabelValues(result).Inc()
 }
 
-// IncFilteredEvent увеличивает счетчик отфильтрованных событий по причине
 func (r *Registry) IncFilteredEvent(reason string) {
 	r.eventsFilteredTotal.WithLabelValues(reason).Inc()
 }
 
-// IncEventProcessingError увеличивает счетчик ошибок обработки событий по причине
 func (r *Registry) IncEventProcessingError(reason string) {
 	r.eventsProcessingErrors.WithLabelValues(reason).Inc()
 }
 
-// SetAggregationQueries обновляет gauge количества уникальных запросов в окне
 func (r *Registry) SetAggregationQueries(count int) {
 	r.aggregationQueries.Set(float64(count))
 }
 
-// SetStopListSize обновляет gauge размера стоп-листа
 func (r *Registry) SetStopListSize(count int) {
 	r.stopListSize.Set(float64(count))
 }
 
-// SetSnapshotItems обновляет gauge размера текущего snapshot
 func (r *Registry) SetSnapshotItems(count int) {
 	r.snapshotItems.Set(float64(count))
 }

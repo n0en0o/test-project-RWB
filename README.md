@@ -10,6 +10,7 @@
 - in-memory sliding window за последние 5 минут
 - быстрый `GET /trends?limit=N`
 - динамический stop-list без перезапуска сервиса
+- in-memory deduplication по `event_id`
 - базовая защита от грубой накрутки
 - Prometheus-метрики на `/metrics`
 - `/healthz` и `/readyz`
@@ -44,8 +45,19 @@ Kafka доступна:
 
 Можно отправить пачку событий через `kafka-console-producer` внутри Kafka-контейнера:
 
+PowerShell:
+
+```powershell
+$ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+1..20 | ForEach-Object {
+  '{"event_id":"event-' + $_ + '","query":"iphone 15 pro","user_id":"user-' + $_ + '","session_id":"session-' + $_ + '","timestamp":"' + $ts + '"}'
+} | docker compose exec -T kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic search-events
+```
+
+Bash:
+
 ```bash
-docker compose exec kafka bash -lc 'for i in $(seq 1 20); do ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "{\"event_id\":\"event-$i\",\"query\":\"iphone 15 pro\",\"user_id\":\"user-$i\",\"session_id\":\"session-$i\",\"timestamp\":\"$ts\"}"; done | kafka-console-producer.sh --bootstrap-server kafka:9092 --topic search-events'
+docker compose exec kafka bash -lc 'for i in $(seq 1 20); do ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo "{\"event_id\":\"event-$i\",\"query\":\"iphone 15 pro\",\"user_id\":\"user-$i\",\"session_id\":\"session-$i\",\"timestamp\":\"$ts\"}"; done | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic search-events'
 ```
 
 Через секунду snapshot обновится, и топ можно проверить:
@@ -90,7 +102,7 @@ curl "http://localhost:8080/trends?limit=5"
 
 ### Stop-list
 
-Stop-list нужен, чтобы быстро скрывать нежелательные запросы из виджета. Он применяется к нормализованной строке запроса.
+Stop-list нужен, чтобы быстро скрывать нежелательные слова из виджета. Он применяется к нормализованной строке запроса и проверяет слова как отдельные токены.
 
 Добавить запрос:
 
@@ -112,7 +124,7 @@ curl http://localhost:8080/stop-list
 curl -X DELETE "http://localhost:8080/stop-list/iphone%2015%20pro"
 ```
 
-После добавления в stop-list запрос скрывается из `/trends` сразу. Физически старые счетчики из агрегатора не удаляются: фильтрация происходит на выдаче. Это проще, быстрее и не требует пересобирать все окно.
+После добавления слова в stop-list все запросы с этим словом скрываются из `/trends` сразу. Например, стоп-слово `iphone` скроет `iphone 15 pro`, но не скроет `microiphone case`. Физически старые счетчики из агрегатора не удаляются: фильтрация происходит на выдаче. Это проще, быстрее и не требует пересобирать все окно.
 
 ### Health И Readiness
 
@@ -176,7 +188,7 @@ curl http://localhost:8080/metrics
 - пустые строки отбрасываются
 - длина ограничивается 256 символами
 
-Я сознательно не добавлял лемматизацию, исправление опечаток и семантическое объединение запросов. Для тестового задания это был бы отдельный большой пласт логики, а здесь важнее показать надежную потоковую агрегацию и быстрые чтения.
+Я сознательно не добавляла лемматизацию, исправление опечаток и семантическое объединение запросов. Для тестового задания это был бы отдельный большой пласт логики, а здесь важнее показать надежную потоковую агрегацию и быстрые чтения.
 
 ## Архитектура
 
@@ -186,6 +198,7 @@ curl http://localhost:8080/metrics
 Kafka
   -> Consumer
   -> Parse / Normalize
+  -> Deduplication
   -> Anti-abuse
   -> Sliding Window Aggregator
   -> Snapshot
@@ -205,6 +218,8 @@ globalCounts   -> map[query]count
 
 ## Антинакрутка
 
+Перед антинакруткой сервис проверяет `event_id`. Уже виденные события в пределах текущего окна отбрасываются, чтобы повторная доставка Kafka-сообщения не увеличивала счетчик.
+
 Базовое правило простое:
 
 - для пары `client_id + normalized_query` учитывается не больше одного события за 30 секунд
@@ -219,11 +234,11 @@ globalCounts   -> map[query]count
 
 - Данные хранятся in-memory. Это быстро, но при рестарте текущий топ теряется
 - Snapshot обновляется периодически, поэтому топ может отставать примерно на `SNAPSHOT_INTERVAL`
-- Stop-list тоже in-memory. Для production-версии я бы вынес его в устойчивое хранилище
+- Stop-list тоже in-memory. Для production-версии я бы вынесла его в устойчивое хранилище
 - Горизонтальное масштабирование потребует отдельного решения: например, партиционирования по query или общего слоя агрегации
 - Текущая защита от накруток базовая, без полноценного antifraud scoring
 - Нормализация строк простая и не объединяет похожие по смыслу запросы
-- `event_id` есть в контракте, но строгая deduplication в отдельном хранилище не добавлена. Для production-версии ее стоит добавить, если Kafka consumer работает в at-least-once режиме и дубли критичны
+- `event_id` заложен в контракт для идемпотентности. Сейчас deduplication in-memory и работает в пределах TTL, поэтому после рестарта сервиса история обработанных id теряется
 
 ## Конфигурация
 
@@ -302,14 +317,3 @@ go run ./cmd/trends-service
 ```
 
 По умолчанию сервис ожидает Kafka на `localhost:9092` и topic `search-events`.
-
-## Что Я Бы Добавил Дальше
-
-Если развивать сервис дальше, первые улучшения были бы такими:
-
-- persistence для stop-list
-- deduplication по `event_id` с ограниченным TTL
-- более строгий readiness check Kafka consumer-а
-- graceful деградация при временной недоступности Kafka
-- отдельные нагрузочные профили для write path и read path
-- распределенная агрегация для нескольких инстансов сервиса

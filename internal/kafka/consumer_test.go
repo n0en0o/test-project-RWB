@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
 
@@ -117,6 +118,34 @@ func TestConsumerConfigValidate(t *testing.T) {
 	}
 }
 
+func TestConsumerRunRetriesFetchErrors(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeReader{
+		fetchErrors: []error{errors.New("temporary fetch error")},
+		messages:    []kafkago.Message{validKafkaMessage("event-1")},
+	}
+	metrics := &fakeConsumerMetrics{}
+	var handled int
+
+	consumer := newTestConsumer(t, reader, EventHandlerFunc(func(ctx context.Context, event trends.SearchEvent) error {
+		handled++
+		return nil
+	}))
+	consumer.SetMetrics(metrics)
+	consumer.SetRetryDelay(time.Nanosecond)
+
+	if err := consumer.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if handled != 1 {
+		t.Fatalf("handled events = %d, want 1", handled)
+	}
+	if metrics.processingErrors["fetch_error"] != 1 {
+		t.Fatalf("fetch errors = %d, want 1", metrics.processingErrors["fetch_error"])
+	}
+}
+
 func newTestConsumer(t *testing.T, reader Reader, handler EventHandler) *Consumer {
 	t.Helper()
 
@@ -144,12 +173,18 @@ func validKafkaMessage(eventID string) kafkago.Message {
 }
 
 type fakeReader struct {
-	messages  []kafkago.Message
-	committed []kafkago.Message
-	closed    bool
+	fetchErrors []error
+	messages    []kafkago.Message
+	committed   []kafkago.Message
+	closed      bool
 }
 
 func (r *fakeReader) FetchMessage(ctx context.Context) (kafkago.Message, error) {
+	if len(r.fetchErrors) > 0 {
+		err := r.fetchErrors[0]
+		r.fetchErrors = r.fetchErrors[1:]
+		return kafkago.Message{}, err
+	}
 	if len(r.messages) == 0 {
 		return kafkago.Message{}, context.Canceled
 	}

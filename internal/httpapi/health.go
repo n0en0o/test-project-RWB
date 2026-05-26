@@ -30,7 +30,6 @@ type healthResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// NewHealthHandler создает handler для health и readiness endpoints
 func NewHealthHandler(checker ReadinessChecker) *HealthHandler {
 	return &HealthHandler{checker: checker}
 }

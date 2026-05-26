@@ -3,6 +3,7 @@ package stoplist
 import (
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 
 	"test-project-rwb/internal/trends"
@@ -15,14 +16,12 @@ type Store struct {
 	items map[string]struct{}
 }
 
-// NewStore создает in-memory хранилище стоп-листа
 func NewStore() *Store {
 	return &Store{
 		items: make(map[string]struct{}),
 	}
 }
 
-// Add добавляет нормализованный запрос в стоп-лист
 func (s *Store) Add(query string) (string, error) {
 	normalized := trends.NormalizeQuery(query)
 	if normalized == "" {
@@ -36,7 +35,6 @@ func (s *Store) Add(query string) (string, error) {
 	return normalized, nil
 }
 
-// Remove удаляет нормализованный запрос из стоп-листа
 func (s *Store) Remove(query string) (string, error) {
 	normalized := trends.NormalizeQuery(query)
 	if normalized == "" {
@@ -50,7 +48,6 @@ func (s *Store) Remove(query string) (string, error) {
 	return normalized, nil
 }
 
-// Contains проверяет, есть ли нормализованный запрос в стоп-листе
 func (s *Store) Contains(query string) bool {
 	normalized := trends.NormalizeQuery(query)
 	if normalized == "" {
@@ -60,11 +57,17 @@ func (s *Store) Contains(query string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	_, ok := s.items[normalized]
-	return ok
+	if _, ok := s.items[normalized]; ok {
+		return true
+	}
+	for _, token := range strings.Fields(normalized) {
+		if _, ok := s.items[token]; ok {
+			return true
+		}
+	}
+	return false
 }
 
-// List возвращает отсортированную копию стоп-листа
 func (s *Store) List() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -78,7 +81,6 @@ func (s *Store) List() []string {
 	return items
 }
 
-// Size возвращает количество запросов в стоп-листе
 func (s *Store) Size() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

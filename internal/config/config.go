@@ -39,7 +39,6 @@ type Config struct {
 	MaxTopItems      int
 }
 
-// Load читает конфигурацию из переменных окружения
 func Load() (Config, error) {
 	window, err := durationEnv("WINDOW", defaultWindow)
 	if err != nil {

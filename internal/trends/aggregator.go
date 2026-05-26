@@ -25,7 +25,6 @@ type Aggregator struct {
 	counts  map[string]int64
 }
 
-// NewAggregator создает агрегатор поисковых запросов за скользящее временное окно
 func NewAggregator(window, futureSkew time.Duration) (*Aggregator, error) {
 	if window <= 0 {
 		return nil, ErrInvalidWindow
@@ -42,7 +41,6 @@ func NewAggregator(window, futureSkew time.Duration) (*Aggregator, error) {
 	}, nil
 }
 
-// Add добавляет валидное поисковое событие в текущее окно агрегации
 func (a *Aggregator) Add(event SearchEvent, now time.Time) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -72,7 +70,6 @@ func (a *Aggregator) Add(event SearchEvent, now time.Time) error {
 	return nil
 }
 
-// Counts возвращает копию текущих счетчиков по нормализованным запросам
 func (a *Aggregator) Counts(now time.Time) map[string]int64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -87,7 +84,6 @@ func (a *Aggregator) Counts(now time.Time) map[string]int64 {
 	return result
 }
 
-// Count возвращает счетчик одного нормализованного запроса
 func (a *Aggregator) Count(query string, now time.Time) int64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -101,12 +97,10 @@ func (a *Aggregator) Count(query string, now time.Time) int64 {
 	return a.counts[normalized]
 }
 
-// Window возвращает длительность окна агрегации
 func (a *Aggregator) Window() time.Duration {
 	return a.window
 }
 
-// FutureSkew возвращает допустимое опережение timestamp события относительно текущего времени
 func (a *Aggregator) FutureSkew() time.Duration {
 	return a.futureSkew
 }

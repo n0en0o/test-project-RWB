@@ -36,7 +36,18 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// NewTrendsHandler создает HTTP handler для выдачи поискового топа
+type RouterConfig struct {
+	Trends   *TrendsHandler
+	StopList *StopListHandler
+	Health   *HealthHandler
+	Metrics  RouterMetrics
+}
+
+type RouterMetrics interface {
+	Middleware(route string, next http.Handler) http.Handler
+	Handler() http.Handler
+}
+
 func NewTrendsHandler(provider TrendsProvider, window time.Duration) (*TrendsHandler, error) {
 	if provider == nil {
 		return nil, ErrNilTrendsProvider
@@ -49,16 +60,23 @@ func NewTrendsHandler(provider TrendsProvider, window time.Duration) (*TrendsHan
 	}, nil
 }
 
-// NewRouter создает HTTP router сервиса
-func NewRouter(trendsHandler *TrendsHandler, stopListHandler ...*StopListHandler) http.Handler {
+func NewRouter(config RouterConfig) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/trends", trendsHandler)
-	healthHandler := NewHealthHandler(nil)
-	mux.Handle(healthPath, healthHandler)
-	mux.Handle(readyPath, healthHandler)
-	if len(stopListHandler) > 0 && stopListHandler[0] != nil {
-		mux.Handle(stopListPath, stopListHandler[0])
-		mux.Handle(stopListPath+"/", stopListHandler[0])
+	if config.Trends != nil {
+		mux.Handle("/trends", withMetrics(config.Metrics, "/trends", config.Trends))
+	}
+	if config.StopList != nil {
+		mux.Handle(stopListPath, withMetrics(config.Metrics, stopListPath, config.StopList))
+		mux.Handle(stopListPath+"/", withMetrics(config.Metrics, stopListPath+"/{query}", config.StopList))
+	}
+	healthHandler := config.Health
+	if healthHandler == nil {
+		healthHandler = NewHealthHandler(nil)
+	}
+	mux.Handle(healthPath, withMetrics(config.Metrics, healthPath, healthHandler))
+	mux.Handle(readyPath, withMetrics(config.Metrics, readyPath, healthHandler))
+	if config.Metrics != nil {
+		mux.Handle("/metrics", config.Metrics.Handler())
 	}
 
 	return mux
@@ -118,4 +136,11 @@ func writeJSON(w http.ResponseWriter, statusCode int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func withMetrics(metrics RouterMetrics, route string, handler http.Handler) http.Handler {
+	if metrics == nil {
+		return handler
+	}
+	return metrics.Middleware(route, handler)
 }

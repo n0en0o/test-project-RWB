@@ -37,7 +37,6 @@ type stopListResponse struct {
 	Count int      `json:"count"`
 }
 
-// NewStopListHandler создает HTTP handler для управления стоп-листом
 func NewStopListHandler(storage StopListStorage) (*StopListHandler, error) {
 	if storage == nil {
 		return nil, ErrNilStopList

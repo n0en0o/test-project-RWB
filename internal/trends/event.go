@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-// MaxQueryLength задает максимальную длину нормализованного поискового запроса
 const MaxQueryLength = 256
 
 var (
@@ -17,7 +16,6 @@ var (
 	ErrEmptyTimestamp = errors.New("timestamp is required")
 )
 
-// SearchEvent описывает контракт сообщения, которое сервис читает из Kafka
 type SearchEvent struct {
 	EventID         string    `json:"event_id"`
 	Query           string    `json:"query"`
@@ -51,7 +49,6 @@ func ParseSearchEvent(payload []byte) (SearchEvent, error) {
 	return event, nil
 }
 
-// NormalizeQuery приводит поисковую строку к форме, пригодной для агрегации
 func NormalizeQuery(query string) string {
 	normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
 	if utf8.RuneCountInString(normalized) <= MaxQueryLength {
@@ -62,7 +59,6 @@ func NormalizeQuery(query string) string {
 	return string(runes[:MaxQueryLength])
 }
 
-// ClientID возвращает идентификатор клиента для базовой антинакрутки
 func (e SearchEvent) ClientID() string {
 	if e.UserID != "" {
 		return e.UserID
