@@ -1,0 +1,53 @@
+services:
+  kafka:
+    image: bitnami/kafka:3.7
+    ports:
+      - "29092:29092"
+    environment:
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  kafka-init:
+    image: bitnami/kafka:3.7
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "kafka-topics.sh --bootstrap-server kafka:9092
+      --create --if-not-exists
+      --topic search-events
+      --partitions 3
+      --replication-factor 1"
+
+  trends-service:
+    build:
+      context: .
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      HTTP_ADDR: ":8080"
+      KAFKA_BROKERS: "kafka:9092"
+      KAFKA_TOPIC: "search-events"
+      KAFKA_GROUP_ID: "trends-service"
+      WINDOW: "5m"
+      FUTURE_SKEW: "10s"
+      ABUSE_INTERVAL: "30s"
+      SNAPSHOT_INTERVAL: "1s"
+      MAX_TOP_ITEMS: "100"
+    restart: unless-stopped

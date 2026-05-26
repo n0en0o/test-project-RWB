@@ -80,6 +80,39 @@ func TestAggregatorRejectsFarFutureEvent(t *testing.T) {
 	}
 }
 
+func TestAggregatorAcceptsWindowBoundaryAndFutureSkew(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 25, 12, 5, 0, 0, time.UTC)
+	aggregator := newTestAggregator(t)
+
+	addEvent(t, aggregator, "event-1", "boundary", now.Add(-5*time.Minute), now)
+	addEvent(t, aggregator, "event-2", "future", now.Add(10*time.Second), now)
+
+	if count := aggregator.Count("BOUNDARY", now); count != 1 {
+		t.Fatalf("boundary count = %d, want 1", count)
+	}
+	if count := aggregator.Count("future", now); count != 1 {
+		t.Fatalf("future count = %d, want 1", count)
+	}
+}
+
+func TestAggregatorCountsReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 25, 12, 5, 0, 0, time.UTC)
+	aggregator := newTestAggregator(t)
+
+	addEvent(t, aggregator, "event-1", "iphone", now, now)
+
+	counts := aggregator.Counts(now)
+	counts["iphone"] = 100
+
+	if count := aggregator.Count("iphone", now); count != 1 {
+		t.Fatalf("aggregator count = %d, want 1", count)
+	}
+}
+
 func newTestAggregator(t *testing.T) *Aggregator {
 	t.Helper()
 
